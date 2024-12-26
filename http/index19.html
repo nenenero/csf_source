@@ -1,0 +1,374 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>飞行流量与航迹查询平台</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.7.1/dist/leaflet.css" />
+  <style>
+    html, body {
+      height: 100%;
+      margin: 0;
+      padding: 0;
+      overflow: hidden; 
+    }
+
+    #map {
+      height: 100%;
+      width: 100%;
+      position: absolute;
+      z-index: 0; 
+    }
+
+    #overlay {
+      position: absolute;
+      top: 20px;
+      right: 10px;
+      width: 50%;
+      max-width: 200px; 
+      z-index: 1; 
+      background-color: rgba(255, 255, 255, 0.5); 
+      pointer-events: none; 
+      padding: 20px; 
+      box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+      text-align: center;
+    }
+
+    #overlay form, #overlay h1, #overlay h2, #overlay p {
+      pointer-events: auto; 
+    }
+
+    #resetMapButton {
+      position: absolute;
+      bottom: 10px;
+      right: 10px;
+      z-index: 2;
+      padding: 10px;
+      background-color: rgba(187, 240, 28, 0.544);
+      border: none;
+      cursor: pointer;
+    }
+
+    #title {
+  position: absolute;
+  top: 5px;
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 30px; 
+  font-weight: bold;
+  z-index: 3;
+  color: #ffa733; 
+}
+
+    #flightInfoBox {
+      position: absolute;
+      top: 80px;
+      left: 10px;
+      width: 30%;
+      max-width: 300px;
+      z-index: 1;
+      background-color: rgba(255, 255, 255, 0.8);
+      pointer-events: auto;
+      padding: 10px;
+      box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+      overflow-y: scroll;
+      height: 400px;
+    }
+
+   
+    form {
+      display: inline;
+      flex-direction: column;
+      align-items: center;
+    }
+
+    form label {
+      width: 50px;
+      text-align: right;
+      margin-right: 5px;
+      margin-bottom: 5px;
+    }
+
+    form input {
+      width: 75px;
+    }
+
+    form select {
+      width: 75px;
+    }
+  </style>
+  <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+  <script src="https://unpkg.com/leaflet@1.7.1/dist/leaflet.js"></script>
+</head>
+
+<body>
+  <div id="overlay">
+    <h1>飞行流量与航迹查询平台</h1>
+    <!-- 交通流量数据查询表单 -->
+    <form id="trafficForm">
+      <label for="month">月份：</label>
+      <select id="month" name="month">
+        <option value="" selected disabled>选择月份</option>
+        <option value="6">6月</option>
+        <option value="7">7月</option>
+      </select>
+      <br><br>
+      <label for="day">日期：</label>
+      <input type="number" id="day" name="day" placeholder="输入日期" min="1" max="31" />
+      <br><br>
+      <label for="hour">小时：</label>
+      <input type="number" id="hour" name="hour" placeholder="输入小时" min="0" max="23" />
+      <br><br>
+      <label for="minute">分钟：</label>
+      <input type="number" id="minute" name="minute" placeholder="输入分钟" min="0" max="59" />
+      <br><br>
+      <button type="button" id="submitBtn">提交</button>
+    </form>
+
+    <h2>飞行流量</h2>
+    <p id="result"></p>
+  </div>
+  <div id="map"></div>
+  <button id="resetMapButton">重置地图</button>
+  <div id="flightInfoBox"></div>
+
+  <script>
+    
+    const map = L.map('map').setView([50.033333, 8.570556], 13);
+
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors"'
+    }).addTo(map);
+
+    const flightPaths = L.layerGroup().addTo(map);
+
+    const flightIdMarkers = L.layerGroup().addTo(map);
+
+    const airportLocations = L.layerGroup().addTo(map);
+
+    function resetMap() {
+      map.setView([50.033333, 8.570556], 13);
+
+      flightPaths.clearLayers();
+      flightIdMarkers.clearLayers();
+    }
+
+   
+    const resetMapButton = document.getElementById('resetMapButton');
+
+    resetMapButton.addEventListener('click', resetMap);
+
+    function addAirportMarker() {
+      
+      const airportIcon = L.icon({
+        iconUrl: 'https://github.com/nenenero/csf_source/blob/main/airpot.png?raw=true',
+        iconSize: [41, 41], 
+        iconAnchor: [12, 41], 
+        popupAnchor: [1, -34], 
+        shadowUrl: 'https://unpkg.com/leaflet@1.7.1/dist/images/marker-shadow.png', 
+        shadowSize: [41, 41], 
+        shadowAnchor: [12, 41],
+      });
+
+      L.marker([50.033333, 8.570556], { icon: airportIcon }).addTo(airportLocations)
+      .bindPopup('机场位置')
+      .openPopup();
+    }
+
+    
+    addAirportMarker();
+
+   
+    function fetchFlightData(day, hour, minute) {
+      return fetch(`/get_flight_data/?day=${day}&hour=${hour}&minute=${minute}`)
+      .then(response => response.json())
+      .catch(error => {
+          console.error('获取航班数据出错：', error);
+          return null; 
+        });
+    }
+
+    
+    function fetchPredictedDataForJuly(day, hour, minute) {
+      return fetch(`/get_predicted_data_for_july/?day=${day}&hour=${hour}&minute=${minute}`)
+      .then(response => response.json())
+      .catch(error => {
+          console.error('获取7月预测数据出错：', error);
+          return null;
+        });
+    }
+
+    
+    const colors = ['red', 'blue', 'green', 'yellow', 'purple'];
+
+    
+    $(document).ready(function () {
+     
+      $('#submitBtn').click(async function () {
+
+      
+        map.setView([50.033333, 8.570556], 8);
+
+        const month = $('#month').val(); 
+        const day = $('#day').val();
+        const hour = $('#hour').val();
+        const minute = $('#minute').val();
+
+        if (!month ||!day ||!hour ||!minute) {
+          alert("请填写所有字段！");
+          return;
+        }
+
+       
+        if (month === "6" && (day < 1 || day > 30)) {
+          alert("对于6月，请输入1到30之间的日期。");
+          return;
+        }
+        if (month === "7" && (day < 1 || day > 9)) {
+          alert("对于7月，请输入1到9之间的日期。");
+          return;
+        }
+
+       
+        if ( hour > 23 ) {
+          alert("请输入正确的时间。");
+          return;
+        }
+
+       
+        if ( minute > 59) {
+          alert("请输入正确的时间。");
+          return;
+        }
+
+       
+        flightPaths.clearLayers();
+        flightIdMarkers.clearLayers();
+
+      
+        $.ajax({
+          url: '/get_traffic/',
+          type: 'POST',
+          contentType: 'application/json',
+          data: JSON.stringify({ month: parseInt(month), day: parseInt(day), hour: parseInt(hour), minute: parseInt(minute) }),
+          success: function (response) {
+            $('#result').text(`飞行流量：${response.traffic_volume}`);
+          },
+          error: function (response) {
+            const errorMessage = response.responseJSON && response.responseJSON.error
+             ? response.responseJSON.error
+              : '发生未知错误。';
+            $('#result').text(`错误：${errorMessage}`);
+          }
+        });
+        if(month === "7")
+        {
+          $("#title").text("流量预测");
+
+          $("#flightInfoBox").empty();
+
+        }
+        
+        if (month === "6") {
+          $("#title").text("航迹展示");
+          
+          const flightData = await fetchFlightData(parseInt(day), parseInt(hour), parseInt(minute));
+          if (flightData && flightData.flights && flightData.flights.length > 0) {
+            const uniqueFlightIds = new Set(); 
+            const flightInfo = []; 
+            flightData.flights.forEach((flightPath, index) => {
+              const flightId = flightPath[0].id;
+              const startPoint = {
+                latitude: flightPath[0].latitude,
+                longitude: flightPath[0].longitude
+              };
+              const endPoint = {
+                latitude: flightPath[flightPath.length - 1].latitude,
+                longitude: flightPath[flightPath.length - 1].longitude
+              };
+              flightInfo.push({
+                id: flightId,
+                start: startPoint,
+                end: endPoint
+              });
+
+              // 使用移动平均法
+              const smoothedPath = getSmoothedPathByMovingAverage(flightPath);
+
+              if (uniqueFlightIds.size < 5 &&!uniqueFlightIds.has(flightId)) { 
+                uniqueFlightIds.add(flightId);
+                const polyline = L.polyline(smoothedPath, { color: colors[index % colors.length] }).addTo(flightPaths);
+               
+                L.marker(smoothedPath[0], { title: `飞机ID：${flightId}` }).addTo(flightIdMarkers)
+                .bindPopup(`飞机ID：${flightId}`)
+                .openPopup();
+              }
+            });
+            
+            const flightInfoBox = $("#flightInfoBox");
+            flightInfoBox.empty();
+            flightInfo.forEach(info => {
+              const button = document.createElement('button');
+              button.textContent = `飞机ID：${info.id}`;
+              button.className = 'flight-id-button';
+              button.addEventListener('click', function () {
+                const flightId = info.id;
+                redrawFlightPath(flightId, flightData.flights);
+              });
+              const startInfo = document.createElement('p');
+              startInfo.textContent = `起点：(${info.start.latitude}, ${info.start.longitude})`;
+              const endInfo = document.createElement('p');
+              endInfo.textContent = `终点：(${info.end.latitude}, ${info.end.longitude})`;
+              flightInfoBox.append(button, startInfo, endInfo);
+            });
+          } else {
+            
+            $("#flightInfoBox").empty();
+
+            alert('当前时段航迹数据缺失');
+           
+            console.log('没有所选时间的航班数据。');
+          }
+        } 
+
+        
+      });
+    });
+
+   
+    function getSmoothedPathByMovingAverage(points) {
+      const smoothedPoints = [];
+      const windowSize = 3;
+      for (let i = 0; i < points.length; i++) {
+        let sumLat = 0;
+        let sumLon = 0;
+        let count = 0;
+        for (let j = Math.max(0, i - (windowSize - 1) / 2); j <= Math.min(points.length - 1, i + (windowSize - 1) / 2); j++) {
+          sumLat += points[j].latitude;
+          sumLon += points[j].longitude;
+          count++;
+        }
+        smoothedPoints.push([sumLat / count, sumLon / count]);
+      }
+      return smoothedPoints;
+    }
+
+   
+    function redrawFlightPath(flightId, allFlightPaths) {
+      flightPaths.clearLayers();
+      flightIdMarkers.clearLayers();
+      const targetFlightPath = allFlightPaths.find(path => path[0].id === flightId);
+      if (targetFlightPath) {
+        const smoothedPath = getSmoothedPathByMovingAverage(targetFlightPath);
+        const polyline = L.polyline(smoothedPath, { color: 'blue' }).addTo(flightPaths);
+        L.marker(smoothedPath[0], { title: `飞机ID：${flightId}` }).addTo(flightIdMarkers)
+.bindPopup(`飞机ID：${flightId}`)
+.openPopup();
+      }
+    }
+  </script>
+  <div id="title"></div>
+</body>
+
+</html>
